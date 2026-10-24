@@ -231,7 +231,7 @@ export default function Sidebar() {
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all group"
           >
             <LogOut className="w-3.5 h-3.5 group-hover:text-red-400 transition-colors" />
-            <span>21. Sign Out</span>
+            <span>Sign Out</span>
           </button>
         </div>
       )}
