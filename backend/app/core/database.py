@@ -20,6 +20,11 @@ async def connect_db():
         "connectTimeoutMS": 15000,
     }
     if url.startswith("mongodb+srv://"):
+        try:
+            import certifi
+            kwargs["tlsCAFile"] = certifi.where()
+        except Exception:
+            pass
         kwargs["tls"] = True
         kwargs["tlsAllowInvalidCertificates"] = False
 
