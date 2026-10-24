@@ -26,6 +26,7 @@ const STAFF_ACCOUNTS = [
 ];
 
 const STUDENT_ACCOUNTS = [
+  { label:'Initial Login Demo (Student@123)', u:'STU001', p:'Student@123', cgpa:'8.7', desc:'🔑 Demonstrates Forced First-Login Password Change', color:'text-amber-400 font-bold' },
   { label:'Arun Kumar',    u:'stu001', p:'stu001', cgpa:'8.7', desc:'✅ All eligible — CSE, no arrears', color:'text-emerald-400' },
   { label:'Priya Devi',    u:'stu002', p:'stu002', cgpa:'7.8', desc:'❌ 1 current arrear — ECE',          color:'text-amber-400'  },
   { label:'Ravi Shankar',  u:'stu003', p:'stu003', cgpa:'8.2', desc:'❌ Mechanical — ineligible stream',  color:'text-red-400'    },

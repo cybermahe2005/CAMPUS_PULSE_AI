@@ -9,7 +9,8 @@ from app.core.config import settings
 from app.core.database import connect_db, close_db
 from app.api import (
     health, auth, students, dashboard, predictions, simulator,
-    interventions, placement, copilot, data_quality, jobs, student_placement
+    interventions, placement, copilot, data_quality, jobs, student_placement,
+    csv_import, attendance, assessments, exports
 )
 
 
@@ -17,6 +18,12 @@ from app.api import (
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
     await connect_db()
+    try:
+        from app.api.auth import bootstrap_initial_users
+        await bootstrap_initial_users()
+    except Exception as e:
+        import logging
+        logging.getLogger("uvicorn.error").warning(f"Could not bootstrap initial users: {e}")
     yield
     await close_db()
 
@@ -56,3 +63,7 @@ app.include_router(student_placement.router, prefix="/api/student/placement",  t
 # Supporting Routers
 app.include_router(copilot.router,      prefix="/api/copilot",      tags=["Copilot"])
 app.include_router(data_quality.router, prefix="/api/data-quality", tags=["Data Quality"])
+app.include_router(csv_import.router,   prefix="/api/csv-import",   tags=["CSV Import"])
+app.include_router(attendance.router,   prefix="/api/attendance",   tags=["Attendance"])
+app.include_router(assessments.router,  prefix="/api/assessments",  tags=["Assessments"])
+app.include_router(exports.router,      prefix="/api/exports",      tags=["Exports"])

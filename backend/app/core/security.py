@@ -44,42 +44,64 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> TokenData:
         responsibilities: list = payload.get("responsibilities", [])
         class_ids: list        = payload.get("classIds", [])
         mentee_ids: list       = payload.get("menteeIds", [])
+        must_change_password: bool = payload.get("mustChangePassword", False)
         if user_id is None:
             raise credentials_exception
         return TokenData(
             userId=user_id,
-            role=UserRole(role),
+            role=UserRole(role) if role in [r.value for r in UserRole] else UserRole.STUDENT,
             department=department,
             name=name,
             responsibilities=responsibilities,
             classIds=class_ids,
             menteeIds=mentee_ids,
+            mustChangePassword=must_change_password,
         )
     except JWTError:
         raise credentials_exception
 
 
 def require_roles(allowed_roles: List[UserRole]):
-    """Dependency factory for role-based access control."""
+    """Dependency factory for role-based access control, also checking additive responsibilities."""
     async def checker(current_user: TokenData = Depends(get_current_user)):
-        if current_user.role not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied. Required roles: {[r.value for r in allowed_roles]}",
-            )
-        return current_user
+        # Check direct role
+        if current_user.role in allowed_roles:
+            return current_user
+        # Check if any responsibility matches allowed roles
+        user_resps = set(current_user.responsibilities or [])
+        allowed_values = {r.value for r in allowed_roles}
+        if user_resps.intersection(allowed_values):
+            return current_user
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied. Required roles: {[r.value for r in allowed_roles]}",
+        )
     return checker
 
 
-# Convenience role guards
-require_admin          = require_roles([UserRole.ADMIN])
-require_institution    = require_roles([UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL])
-require_hod_up         = require_roles([UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL, UserRole.HOD])
-require_faculty_up     = require_roles([UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL, UserRole.HOD, UserRole.FACULTY])
-require_placement      = require_roles([UserRole.ADMIN, UserRole.PLACEMENT_OFFICER])
-require_any            = require_roles([UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL,
-                                        UserRole.HOD, UserRole.FACULTY, UserRole.PLACEMENT_OFFICER])
+# Standard role guards
+require_admin       = require_roles([UserRole.ADMIN])
+require_institution = require_roles([UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL])
+require_hod_up      = require_roles([UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL, UserRole.HOD])
+require_faculty_up  = require_roles([
+    UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL,
+    UserRole.HOD, UserRole.FACULTY, UserRole.CLASS_ADVISOR, UserRole.MENTOR
+])
+require_placement   = require_roles([
+    UserRole.ADMIN, UserRole.JOINT_SECRETARY,
+    UserRole.PLACEMENT_COORDINATOR, UserRole.PLACEMENT_OFFICER
+])
+require_any         = require_roles([
+    UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL,
+    UserRole.HOD, UserRole.FACULTY, UserRole.CLASS_ADVISOR, UserRole.MENTOR,
+    UserRole.PLACEMENT_COORDINATOR, UserRole.PLACEMENT_OFFICER,
+    UserRole.CLASS_REPRESENTATIVE
+])
 # All authenticated users (including STUDENT)
-require_authenticated  = require_roles([UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL,
-                                        UserRole.HOD, UserRole.FACULTY, UserRole.PLACEMENT_OFFICER,
-                                        UserRole.STUDENT])
+require_authenticated = require_roles([
+    UserRole.ADMIN, UserRole.JOINT_SECRETARY, UserRole.PRINCIPAL,
+    UserRole.HOD, UserRole.FACULTY, UserRole.CLASS_ADVISOR, UserRole.MENTOR,
+    UserRole.PLACEMENT_COORDINATOR, UserRole.PLACEMENT_OFFICER,
+    UserRole.STUDENT, UserRole.CLASS_REPRESENTATIVE
+])

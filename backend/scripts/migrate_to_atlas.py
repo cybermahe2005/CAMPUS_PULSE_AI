@@ -1,4 +1,4 @@
-﻿"""
+"""
 Migrate local MongoDB (campus_pulse) -> MongoDB Atlas
 Usage: python scripts/migrate_to_atlas.py
 """
@@ -7,11 +7,13 @@ import sys
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, BulkWriteError
 
+import os
+
 # CONFIG
 LOCAL_URI   = "mongodb://localhost:27017"
 LOCAL_DB    = "campus_pulse"
 
-ATLAS_URI   = "mongodb+srv://campus_admin:Admin123@campuspulsecluster.xlvejg.mongodb.net/?retryWrites=true&w=majority&appName=CampusPulseCluster"
+ATLAS_URI   = os.getenv("ATLAS_URI", "")
 ATLAS_DB    = "campus_pulse"
 
 def migrate():

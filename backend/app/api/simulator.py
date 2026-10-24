@@ -1,85 +1,96 @@
-"""Simulator API — What-If scenario engine."""
+"""
+Simulator API — What-If scenario engine powered by the canonical Risk Engine.
+Allows authorized users to simulate alternative futures without modifying stored records.
+"""
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from typing import Optional
-from app.core.security import require_any
-from app.schemas.auth import TokenData
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any
+
+from app.core.security import get_current_user
+from app.schemas.auth import TokenData, UserRole
 from app.core.database import get_db
+from app.core.risk_engine import evaluate_student_state
 
 router = APIRouter()
 
+
 class SimulatorRequest(BaseModel):
-    attendancePct:      Optional[float] = None
-    codingScore:        Optional[float] = None
-    mockInterviewScore: Optional[float] = None
-    aptitudeScore:      Optional[float] = None
-    lmsConsistency:     Optional[float] = None
-    dsaScore:           Optional[float] = None
+    attendancePct: Optional[float] = Field(None, ge=0.0, le=100.0, description="Simulated Attendance Percentage")
+    codingScore: Optional[float] = Field(None, ge=0.0, le=100.0, description="Simulated Coding Assessment Score")
+    mockInterviewScore: Optional[float] = Field(None, ge=0.0, le=100.0, description="Simulated Mock Interview Score")
+    aptitudeScore: Optional[float] = Field(None, ge=0.0, le=100.0, description="Simulated Aptitude Score")
+    lmsConsistency: Optional[float] = Field(None, ge=0.0, le=100.0, description="Simulated LMS Interaction %")
+    dsaScore: Optional[float] = Field(None, ge=0.0, le=100.0, description="Simulated Data Structures Score")
+    backlogCount: Optional[int] = Field(None, ge=0, le=20, description="Simulated Active Backlogs")
+    cgpa: Optional[float] = Field(None, ge=0.0, le=10.0, description="Simulated CGPA")
 
-def clamp(v, lo=0, hi=100): return max(lo, min(hi, v))
-
-def run_formula(s: dict):
-    """Transparent SSI formula — identical to generate_data.py, deterministic."""
-    academic_r  = clamp(s["cgpa"] * 9.8 - s.get("backlogCount",0) * 5)
-    dsa         = s.get("skills",{}).get("dsa", s.get("codingScore",50))
-    placement_r = clamp(s["codingScore"]*0.30 + s["aptitudeScore"]*0.25 +
-                        s["mockInterviewScore"]*0.25 + dsa*0.20)
-    engagement_h= clamp(s["lmsConsistency"]*0.40 + s.get("eventCount",5)*3.5 +
-                        s.get("certificationCount",1)*5 + s["attendancePct"]*0.20)
-    mom         = s.get("momentum","STABLE")
-    mom_val     = 10 if mom == "POSITIVE" else -10 if mom == "NEGATIVE" else 0
-    ssi         = clamp(academic_r*0.35 + placement_r*0.30 + engagement_h*0.20 + mom_val)
-    risk_prob   = clamp((100 - ssi) / 100 * 0.8, 0, 1)
-    if risk_prob < 0.25: risk_lv = "healthy"
-    elif risk_prob < 0.50: risk_lv = "watch"
-    elif risk_prob < 0.72: risk_lv = "at_risk"
-    else: risk_lv = "critical"
-    return {
-        "successIndex":       round(ssi, 1),
-        "academicReadiness":  round(academic_r, 1),
-        "placementReadiness": round(placement_r, 1),
-        "engagementHealth":   round(engagement_h, 1),
-        "riskProbability":    round(risk_prob, 3),
-        "riskLevel":          risk_lv,
-    }
 
 @router.post("/{student_id}")
 async def simulate(
     student_id: str,
     req: SimulatorRequest,
-    current_user: TokenData = Depends(require_any),
+    current_user: TokenData = Depends(get_current_user),
 ):
+    # IDOR check: Student can only simulate their own profile
+    if current_user.role == UserRole.STUDENT and student_id != current_user.userId:
+        raise HTTPException(status_code=403, detail="Students can only simulate their own profile")
+
     db = await get_db()
-    student = await db.students.find_one({"studentId": student_id}, {"_id":0})
+    student = await db.students.find_one({"studentId": student_id}, {"_id": 0})
     if not student:
         raise HTTPException(status_code=404, detail=f"Student {student_id} not found")
 
-    # Build scenario copy — NEVER modifies real student
-    scenario = dict(student)
-    changes = req.model_dump(exclude_none=True)
-    if "dsaScore" in changes:
-        scenario.setdefault("skills", {})["dsa"] = changes.pop("dsaScore")
-    scenario.update(changes)
+    # Evaluate baseline state using canonical risk engine
+    baseline = evaluate_student_state(student)
 
-    current_result  = run_formula(student)
-    scenario_result = run_formula(scenario)
+    # Build scenario clone — NEVER mutates database document
+    scenario_student = dict(student)
+    applied_changes = req.model_dump(exclude_none=True)
 
+    for k, v in applied_changes.items():
+        if k == "dsaScore":
+            scenario_student.setdefault("skills", {})["dsa"] = v
+        elif k == "backlogCount":
+            scenario_student["backlogCount"] = v
+            scenario_student["currentArrears"] = v
+        else:
+            scenario_student[k] = v
+
+    # Dynamic momentum determination for scenario
+    # If simulated improvements in attendance or skills exceed baseline significantly:
+    net_improvement = (
+        (scenario_student.get("attendancePct", 75) - student.get("attendancePct", 75)) +
+        (scenario_student.get("codingScore", 50) - student.get("codingScore", 50)) +
+        ((student.get("backlogCount", 0) - scenario_student.get("backlogCount", 0)) * 15)
+    )
+    if net_improvement >= 15.0:
+        scenario_student["momentum"] = "POSITIVE"
+    elif net_improvement <= -15.0:
+        scenario_student["momentum"] = "NEGATIVE"
+
+    # Evaluate scenario state
+    scenario = evaluate_student_state(scenario_student)
+
+    # Calculate exact deltas
     delta = {
-        "successIndex":       round(scenario_result["successIndex"] - current_result["successIndex"], 1),
-        "academicReadiness":  round(scenario_result["academicReadiness"] - current_result["academicReadiness"], 1),
-        "placementReadiness": round(scenario_result["placementReadiness"] - current_result["placementReadiness"], 1),
-        "engagementHealth":   round(scenario_result["engagementHealth"] - current_result["engagementHealth"], 1),
-        "riskProbability":    round(scenario_result["riskProbability"] - current_result["riskProbability"], 3),
+        "successIndex": round(scenario["successIndex"] - baseline["successIndex"], 1),
+        "academicReadiness": round(scenario["academicReadiness"] - baseline["academicReadiness"], 1),
+        "placementReadiness": round(scenario["placementReadiness"] - baseline["placementReadiness"], 1),
+        "engagementHealth": round(scenario["engagementHealth"] - baseline["engagementHealth"], 1),
+        "riskProbability": round(scenario["riskProbability"] - baseline["riskProbability"], 3),
+        "backlogDelta": scenario["backlogCount"] - baseline["backlogCount"],
     }
-    tier_changed = scenario_result["riskLevel"] != current_result["riskLevel"]
+
+    tier_changed = scenario["riskLevel"] != baseline["riskLevel"]
 
     return {
-        "studentId":    student_id,
-        "studentName":  student["name"],
-        "current":      current_result,
-        "scenario":     scenario_result,
-        "scenarioInputs": changes,
-        "delta":        delta,
-        "tierChanged":  tier_changed,
-        "disclaimer":   "Scenario outputs are model estimates based on a transparent formula. They represent possible outcomes under different conditions, not causal guarantees.",
+        "studentId": student_id,
+        "studentName": student.get("name"),
+        "department": student.get("department"),
+        "current": baseline,
+        "scenario": scenario,
+        "scenarioInputs": applied_changes,
+        "delta": delta,
+        "tierChanged": tier_changed,
+        "disclaimer": "Scenario projections are model estimates derived from the institutional canonical risk engine. Real database records remain unaltered.",
     }

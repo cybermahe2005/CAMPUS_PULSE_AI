@@ -1,22 +1,26 @@
 """Pydantic schemas — Auth and Token models."""
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 
 
 class UserRole(str, Enum):
-    # Institution leadership
-    ADMIN              = "ADMIN"               # system administrator (super)
-    JOINT_SECRETARY    = "JOINT_SECRETARY"      # institution-wide analytics, role mgmt
-    PRINCIPAL          = "PRINCIPAL"            # institution-wide oversight
-    # Department
-    HOD                = "HOD"                  # own-department scope
-    # Faculty (base role — responsibilities added separately)
-    FACULTY            = "FACULTY"
-    # Placement team
-    PLACEMENT_OFFICER  = "PLACEMENT_OFFICER"    # institution or dept placement scope
+    # System & Institution leadership
+    ADMIN                  = "ADMIN"                  # system administrator
+    JOINT_SECRETARY        = "JOINT_SECRETARY"        # institution-wide analytics & management
+    PRINCIPAL              = "PRINCIPAL"              # institution-wide academic oversight
+    # Department leadership
+    HOD                    = "HOD"                    # assigned department scope
+    # Faculty & academic roles
+    FACULTY                = "FACULTY"                # faculty assigned scope
+    CLASS_ADVISOR          = "CLASS_ADVISOR"          # class / section advisor
+    MENTOR                 = "MENTOR"                 # assigned mentee scope
+    # Placement
+    PLACEMENT_COORDINATOR  = "PLACEMENT_COORDINATOR"  # placement management
+    PLACEMENT_OFFICER      = "PLACEMENT_OFFICER"      # alias for placement coordinator
     # Students
-    STUDENT            = "STUDENT"
+    STUDENT                = "STUDENT"                # self-only access
+    CLASS_REPRESENTATIVE   = "CLASS_REPRESENTATIVE"   # student with aggregate class info
 
 
 class FacultyResponsibility(str, Enum):
@@ -26,7 +30,7 @@ class FacultyResponsibility(str, Enum):
 
 
 class StudentResponsibility(str, Enum):
-    CLASS_REPRESENTATIVE = "CLASS_REPRESENTATIVE"
+    CLASS_REPRESENTATIVE   = "CLASS_REPRESENTATIVE"
 
 
 class LoginRequest(BaseModel):
@@ -34,18 +38,30 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: "UserInfo"
+class ChangePasswordRequest(BaseModel):
+    old_password: Optional[str] = None
+    new_password: Optional[str] = None
+    currentPassword: Optional[str] = None
+    newPassword: Optional[str] = None
 
 
 class UserInfo(BaseModel):
     userId: str
     name: str
     role: UserRole
+    responsibilities: List[str] = []
     department: Optional[str] = None
     email: Optional[str] = None
+    mustChangePassword: bool = False
+    classIds: List[str] = []
+    menteeIds: List[str] = []
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserInfo
+    mustChangePassword: bool = False
 
 
 class TokenData(BaseModel):
@@ -53,9 +69,10 @@ class TokenData(BaseModel):
     role: UserRole
     department: Optional[str] = None
     name: str = ""
-    responsibilities: list = []   # e.g. ["CLASS_ADVISOR", "PLACEMENT_COORDINATOR"]
-    classIds: list = []           # assigned class IDs (CLASS_ADVISOR)
-    menteeIds: list = []          # assigned student IDs (MENTOR)
+    responsibilities: List[str] = []
+    classIds: List[str] = []
+    menteeIds: List[str] = []
+    mustChangePassword: bool = False
 
 
 Token.model_rebuild()
