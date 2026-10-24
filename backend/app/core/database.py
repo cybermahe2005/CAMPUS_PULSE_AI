@@ -15,20 +15,24 @@ async def connect_db():
     global client, db
     url = settings.MONGODB_URL or "mongodb://localhost:27017"
 
-    logger.info(f"Connecting to local MongoDB at {url}...")
-    client = motor.motor_asyncio.AsyncIOMotorClient(
-        url,
-        serverSelectionTimeoutMS=5000,
-        connectTimeoutMS=5000,
-    )
+    kwargs = {
+        "serverSelectionTimeoutMS": 15000,
+        "connectTimeoutMS": 15000,
+    }
+    if url.startswith("mongodb+srv://"):
+        kwargs["tls"] = True
+        kwargs["tlsAllowInvalidCertificates"] = False
+
+    logger.info(f"Connecting to MongoDB at {url.split('@')[-1] if '@' in url else url}...")
+    client = motor.motor_asyncio.AsyncIOMotorClient(url, **kwargs)
     db = client[settings.DB_NAME]
 
     try:
         await client.admin.command("ping")
-        logger.info(f"Connected to local MongoDB database: '{settings.DB_NAME}' (Compass ready at {url})")
+        logger.info(f"Connected to MongoDB database: '{settings.DB_NAME}'")
         await _create_indexes()
     except Exception as e:
-        logger.warning(f"Local MongoDB connection warning: {e}. Ensure MongoDB service is running locally on port 27017.")
+        logger.warning(f"MongoDB connection ping warning: {e}")
 
 
 async def close_db():
